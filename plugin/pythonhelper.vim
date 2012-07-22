@@ -72,7 +72,7 @@ class PythonTag(object):
 
     # METHODS {{{
     
-    def __init__(self, type, name, fullName, lineNumber, indentLevel):
+    def __init__(self, type, name, fullName, lineNumber, indentLevel, signature=None):
         # DOC {{{
         """Initializes instances of PythonTag().
 
@@ -95,6 +95,7 @@ class PythonTag(object):
         self.type               = type
         self.name               = name
         self.fullName           = fullName
+        self.signature          = signature
         self.lineNumber         = lineNumber
         self.indentLevel        = indentLevel
         # }}}
@@ -137,7 +138,7 @@ class SimplePythonTagsParser(object):
     # regexp used to extract a class name
     CLASS_RE                    = re.compile('class[ \t]+([^(:]+).*')
     # regexp used to extract a method or function name
-    METHOD_RE                   = re.compile('def[ \t]+([^(]+).*')
+    METHOD_RE                   = re.compile('def[ \t]+([^(]+)(.*):')
 
     # }}}
 
@@ -222,8 +223,9 @@ class SimplePythonTagsParser(object):
 
                 # if the method/function tag has been found, store some information on it {{{
                 if (tagMatch):
-                    currentTag = self.getPythonTag(tagsStack, lineNumber, lineMatch.group(1),
-                                                   tagMatch.group(1), self.tagFunctionTypeDecidingMethod)
+                    currentTag = self.getPythonTag(tagsStack, lineNumber, lineMatch.group(1), 
+                                                   tagMatch.group(1), self.tagFunctionTypeDecidingMethod,
+                                                   signature=tagMatch.group(2))
                     tagLineNumbers.append(lineNumber)
                     tags[lineNumber] = currentTag
                 # }}}
@@ -287,7 +289,7 @@ class SimplePythonTagsParser(object):
     computeIndentationLevel = staticmethod(computeIndentationLevel)
 
 
-    def getPythonTag(self, tagsStack, lineNumber, indentChars, tagName, tagTypeDecidingMethod):
+    def getPythonTag(self, tagsStack, lineNumber, indentChars, tagName, tagTypeDecidingMethod, signature=None):
         # DOC {{{
         """Returns instance of PythonTag() based on the specified data.
 
@@ -323,7 +325,7 @@ class SimplePythonTagsParser(object):
             # otherwise we have all information on the current tag and can return it {{{
             else:
                 # create the tag
-                tag = PythonTag(tagTypeDecidingMethod(parentTag.type), tagName, "%s.%s" % (parentTag.fullName, tagName,), lineNumber, indentLevel)
+                tag = PythonTag(tagTypeDecidingMethod(parentTag.type), tagName, "%s.%s" % (parentTag.fullName, tagName,), lineNumber, indentLevel, signature=signature)
 
                 # break the loop
                 break
@@ -335,7 +337,7 @@ class SimplePythonTagsParser(object):
         # handle a top-indent level tag {{{
         else:
             # create the tag
-            tag = PythonTag(tagTypeDecidingMethod(None), tagName, tagName, lineNumber, indentLevel)
+            tag = PythonTag(tagTypeDecidingMethod(None), tagName, tagName, lineNumber, indentLevel, signature=signature)
         # }}}
 
         # add the tag to the list of tags
@@ -526,32 +528,32 @@ def findTag(bufferNumber, changedTick):
 
     Parameters
 
-	bufferNumber -- number of the current buffer
+    bufferNumber -- number of the current buffer
 
-	changedTick -- ever increasing number used to tell if the buffer has
-	    been modified since the last time
+    changedTick -- ever increasing number used to tell if the buffer has
+        been modified since the last time
     """
     # }}}
 
     # CODE {{{
     # try to find the best tag {{{
     try:
-	# get the tags data for the current buffer
-	tagLineNumbers, tags = getTags(bufferNumber, changedTick)
+        # get the tags data for the current buffer
+        tagLineNumbers, tags = getTags(bufferNumber, changedTick)
 
-	# link to vim's internal data {{{
-	currentBuffer = vim.current.buffer
-	currentWindow = vim.current.window
-	row, col = currentWindow.cursor
-	# }}}
+        # link to vim's internal data {{{
+        currentBuffer = vim.current.buffer
+        currentWindow = vim.current.window
+        row, col = currentWindow.cursor
+        # }}}
 
-	# get the index of the nearest line
-	nearestLineIndex = getNearestLineIndex(row, tagLineNumbers)
+        # get the index of the nearest line
+        nearestLineIndex = getNearestLineIndex(row, tagLineNumbers)
 
-	# if any line was found, try to find if the tag is appropriate {{{
-	# (ie. the cursor can be below the last tag but on a code that has nothing
-	# to do with the tag, because it's indented differently, in such case no
-	# appropriate tag has been found.)
+        # if any line was found, try to find if the tag is appropriate {{{
+        # (ie. the cursor can be below the last tag but on a code that has nothing
+        # to do with the tag, because it's indented differently, in such case no
+        # appropriate tag has been found.)
         while (nearestLineIndex > -1):
             # get the line number of the nearest tag
             nearestLineNumber = tagLineNumbers[nearestLineIndex]
@@ -600,42 +602,46 @@ def findTag(bufferNumber, changedTick):
             # the tag is appropriate, so use it {{{
             else:
                 break
-	    # }}}
+            # }}}
+            # }}}
+            # no appropriate tag has been found {{{
+        else:
+            nearestLineNumber = -1
         # }}}
-        # no appropriate tag has been found {{{
-	else:
-	    nearestLineNumber = -1
-	# }}}
-	 
-	# describe the cursor position (what tag the cursor is on) {{{
-        # reset the description
-	tagDescription = ""
+     
+        # describe the cursor position (what tag the cursor is on) {{{
+            # reset the description
+        tagDescription = ""
 
-        # if an appropriate tag has been found, set the description accordingly {{{
-	if (nearestLineNumber > -1):
-	    tagInfo = tags[nearestLineNumber]
-	    tagDescription = "[in %s (%s)]" % (tagInfo.fullName, PythonTag.TAG_TYPE_NAME[tagInfo.type],)
-	# }}}
-	# }}}
+            # if an appropriate tag has been found, set the description accordingly {{{
+        if (nearestLineNumber > -1):
+            tagInfo = tags[nearestLineNumber]
+            tagType = PythonTag.TAG_TYPE_NAME[tagInfo.type]
+            if tagType == "method" or tagType == "function":
+                tagDescription = "%s%s" % (tagInfo.fullName, tagInfo.signature,)
+            else:
+                tagDescription = "%s" % (tagInfo.fullName,)
+        # }}}
+        # }}}
 
-	# update the variable for the status line so it get updated with the new description
-	vim.command("let w:PHStatusLine=\"%s\"" % (tagDescription,))
-    # }}}
+        # update the variable for the status line so it get updated with the new description
+        vim.command("let w:PHStatusLine=\"%s\"" % (tagDescription,))
+        # }}}
 
-    # handle possible exceptions {{{
+        # handle possible exceptions {{{
     except Exception:
         # bury into the traceback {{{
-	ec, ei, tb = sys.exc_info()
-	while (tb != None):
-	    if (tb.tb_next == None):
-		break
-	    tb = tb.tb_next
-        # }}}
+        ec, ei, tb = sys.exc_info()
+        while (tb != None):
+            if (tb.tb_next == None):
+                break
+            tb = tb.tb_next
+            # }}}
 
-        # spit out the error {{{
-	print "ERROR: %s %s %s:%u" % (ec.__name__, ei, tb.tb_frame.f_code.co_filename, tb.tb_lineno,)
-	time.sleep(0.5)
-        # }}}
+            # spit out the error {{{
+        print "ERROR: %s %s %s:%u" % (ec.__name__, ei, tb.tb_frame.f_code.co_filename, tb.tb_lineno,)
+        time.sleep(0.5)
+            # }}}
     # }}}
     # }}}
 
